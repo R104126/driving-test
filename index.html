@@ -87,6 +87,12 @@ input{font:inherit}
 .note a{color:var(--blue)}
 .resume{margin-top:12px;background:var(--yellow-soft);border:1.5px dashed var(--yellow);border-radius:var(--radius);padding:13px;display:flex;align-items:center;gap:10px}
 .resume b{flex:1;font-size:.92rem}
+.gbar{margin-top:12px;background:var(--card);border:1.6px dashed var(--ink2);border-radius:var(--radius);padding:12px 14px;display:flex;align-items:center;gap:11px;box-shadow:var(--shadow)}
+.gbar>.txt{flex:1;min-width:0}
+.gbar b{display:block;font-size:.9rem}
+.gbar small{color:var(--ink2);font-size:.76rem;line-height:1.4}
+.avatarbtn.guest{background:transparent!important;color:var(--ink2);border:2px dashed var(--ink2);box-shadow:none}
+.guestnote{background:var(--yellow-soft);border-left:4px solid var(--yellow);border-radius:8px;padding:10px 12px;font-size:.83rem;line-height:1.6;margin:0 0 14px;color:var(--ink)}
 /* ── buttons ─────────────── */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--blue);color:#fff;font-weight:700;border-radius:12px;padding:11px 18px;font-size:.98rem;transition:filter .1s}
 .btn:active{filter:brightness(.88)}
@@ -205,6 +211,8 @@ const FB_CONFIG = { apiKey:"AIzaSyC_UVo_UwjiL3rD98GjQj2mqJY15dkD4wY", authDomain
 /* ═══════════════════════════════════════════════════════════════ */
 
 const LSKEY='dlsim2';
+const GUEST_ID='guest';
+let guestWarned={practice:false,exam:false}, guestNoRemind=false, pendingGuestData=null;
 const PROF_COLORS=['#1554a6','#00703c','#b3541e','#7b3fa0','#0e7490','#a61e4d','#5c6b1f','#334155'];
 
 /* ---------- root storage / profiles ---------- */
@@ -225,10 +233,18 @@ function loadRoot(){
 }
 let memWarned=false;
 function persist(){
-  try{localStorage.setItem(LSKEY,JSON.stringify(ROOT));}
+  try{
+    const out={profiles:ROOT.profiles.filter(p=>p.id!==GUEST_ID),
+               active:ROOT.active===GUEST_ID?null:ROOT.active, data:{}};
+    for(const k in ROOT.data) if(k!==GUEST_ID) out.data[k]=ROOT.data[k];
+    localStorage.setItem(LSKEY,JSON.stringify(out));
+  }
   catch(e){if(!memWarned){memWarned=true;toast('此瀏覽器無法儲存進度，僅保留於本頁');}}
   cloudQueue();
 }
+function isGuest(){return ROOT.active===GUEST_ID;}
+function guestCount(){if(!S)return 0;return Object.keys(S.stats.moto).length+Object.keys(S.stats.car).length;}
+function dropGuest(){ROOT.profiles=ROOT.profiles.filter(p=>p.id!==GUEST_ID);delete ROOT.data[GUEST_ID];}
 let S=null;
 function activate(id){ROOT.active=id; if(!ROOT.data[id])ROOT.data[id]=blankData(); S=ROOT.data[id]; persist();}
 function activeProfile(){return ROOT.profiles.find(p=>p.id===ROOT.active)||null;}
@@ -276,14 +292,15 @@ function renderLogin(){
     <div class="plate">駕照筆試模擬考場<small>MOCK&nbsp;WRITTEN&nbsp;TEST</small></div>
     <p class="sub">機車 ${DATA.banks.moto.qs.length} 題・汽車 ${DATA.banks.car.qs.length} 題｜選擇帳號開始</p>
     <div style="max-width:420px;margin:0 auto;text-align:left">
-      ${ROOT.profiles.map(p=>`<button class="prof" onclick="pickProfile('${p.id}')">
+      ${ROOT.profiles.filter(p=>p.id!==GUEST_ID).map(p=>`<button class="prof" onclick="pickProfile('${p.id}')">
         <span class="av" style="background:${p.color}">${esc(p.name[0]||'?')}</span>
         <b>${esc(p.name)}</b>${p.pw?'<small>🔒</small>':''}</button>`).join('')}
       <button class="prof" onclick="createProfileModal()" style="border:1.7px dashed var(--line);box-shadow:none;background:transparent">
         <span class="av" style="background:var(--ink2)">＋</span><b>建立新帳號</b></button>
       ${cloud?`<div style="text-align:center;margin-top:16px"><button class="btn green" onclick="cloudLoginModal()">☁️ 雲端帳號登入／註冊</button></div>`:''}
+      <div style="text-align:center;margin-top:12px"><button class="btn ghost small" onclick="startGuest()">👣 以訪客身分試用（不保存進度）</button></div>
     </div>
-    <p class="note" style="max-width:420px;margin:26px auto 0">${cloud?'雲端帳號可跨裝置同步進度；本機帳號僅存於此瀏覽器。':'所有帳號與進度只儲存在這台裝置的瀏覽器裡，不會上傳到任何地方。'}</p>
+    <p class="note" style="max-width:420px;margin:26px auto 0">${cloud?'雲端帳號可跨裝置同步進度；本機帳號僅存於此瀏覽器；訪客模式不保存，但隨時可綁定帳號把進度留下來。':'本機帳號的進度只存在這台裝置；訪客模式不保存，但隨時可綁定帳號把進度留下來。'}</p>
   </div>`;
 }
 window.pickProfile=function(id){
@@ -301,8 +318,68 @@ window.pickProfile=function(id){
     $('#pwin').onkeydown=e=>{if(e.key==='Enter')tryIt();};
   }else{activate(id);go({name:'home'});}
 };
-window.createProfileModal=function(){
-  modal(`<h3>建立新帳號</h3>
+window.startGuest=function(){
+  if(!ROOT.profiles.find(p=>p.id===GUEST_ID))
+    ROOT.profiles.push({id:GUEST_ID,name:'訪客',color:'var(--ink2)',guest:true});
+  ROOT.data[GUEST_ID]=blankData();
+  guestWarned={practice:false,exam:false}; guestNoRemind=false; pendingGuestData=null;
+  ROOT.active=GUEST_ID; S=ROOT.data[GUEST_ID];
+  go({name:'home'});
+};
+function guestWarn(kind,fn){
+  if(!isGuest()||guestWarned[kind]){fn();return;}
+  guestWarned[kind]=true;
+  const what=kind==='exam'?'這場模擬考的作答與成績':'接下來的作答紀錄';
+  modal(`<h3>👣 訪客模式提醒</h3>
+  <p>${what}只會留在這個頁面上。<b style="color:var(--bad)">重新整理、關掉分頁或關掉瀏覽器，進度就會消失</b>，錯題本也不會長期保存。<br><br>沒關係，你可以先試用看看，做完之後再決定要不要綁定帳號——綁定時目前的紀錄會原封不動搬過去。</p>
+  <div class="acts" style="flex-wrap:wrap;gap:8px"><button class="btn ghost" id="mbind">先綁定帳號</button>
+  <button class="btn" id="mok">知道了，開始</button></div>`);
+  $('#mok').onclick=()=>{closeModal();fn();};
+  $('#mbind').onclick=()=>{closeModal();bindNow();};
+}
+function guestBindPrompt(ctx){
+  if(!isGuest()||guestNoRemind||$('#modal'))return;
+  const n=guestCount(); if(!n)return;
+  modal(`<h3>要把這些進度留下來嗎？</h3>
+  <p>你目前是訪客身分，已經作答 <b>${n}</b> 題${ctx==='exam'?'（含這場模擬考的成績與錯題）':''}。這些紀錄只存在這個頁面，<b>重新整理就會不見</b>。<br><br>綁定帳號可以完整保留，包含刷題進度與錯題本；不想綁也沒關係，可以繼續用訪客身分玩。</p>
+  <div class="acts" style="flex-wrap:wrap;gap:8px">
+    <button class="btn ghost" id="mlater">稍後再說</button>
+    ${FB_CONFIG?`<button class="btn green" id="mcloud">☁️ 雲端帳號</button>`:''}
+    <button class="btn" id="mlocal">建立本機帳號</button></div>
+  <div style="text-align:center;margin-top:12px"><button class="btn small ghost" id="mnever">本次不再提醒</button></div>`);
+  $('#mlater').onclick=()=>closeModal();
+  $('#mnever').onclick=()=>{guestNoRemind=true;closeModal();toast('好，這次不再提醒');};
+  $('#mlocal').onclick=()=>{closeModal();createProfileModal(true);};
+  if($('#mcloud'))$('#mcloud').onclick=()=>{pendingGuestData=JSON.parse(JSON.stringify(S));closeModal();cloudLoginModal();};
+}
+window.bindNow=function(){
+  const n=guestCount();
+  modal(`<h3>綁定帳號</h3>
+  <p>把目前的進度${n?`（已作答 ${n} 題）`:''}保存下來。<br>本機帳號存在這台裝置；雲端帳號可跨裝置同步。</p>
+  <div class="acts" style="flex-wrap:wrap;gap:8px">
+    <button class="btn ghost" onclick="closeModal()">取消</button>
+    ${FB_CONFIG?`<button class="btn green" id="mcloud">☁️ 雲端帳號</button>`:''}
+    <button class="btn" id="mlocal">建立本機帳號</button></div>`);
+  $('#mlocal').onclick=()=>{closeModal();createProfileModal(true);};
+  if($('#mcloud'))$('#mcloud').onclick=()=>{pendingGuestData=JSON.parse(JSON.stringify(S));closeModal();cloudLoginModal();};
+};
+function leaveGuest(){
+  const n=guestCount();
+  const bail=()=>{dropGuest();ROOT.active=null;S=null;go({name:'login'});};
+  if(!n){bail();return;}
+  modal(`<h3>離開訪客模式？</h3>
+  <p>已作答 ${n} 題，離開後這些紀錄會直接消失。</p>
+  <div class="acts" style="flex-wrap:wrap;gap:8px">
+    <button class="btn ghost" onclick="closeModal()">取消</button>
+    <button class="btn danger" id="mdrop">直接離開</button>
+    <button class="btn green" id="mbind">先綁定保存</button></div>`);
+  $('#mdrop').onclick=()=>{closeModal();bail();};
+  $('#mbind').onclick=()=>{closeModal();bindNow();};
+}
+window.createProfileModal=function(migrate){
+  const gn=migrate?guestCount():0;
+  modal(`<h3>${migrate?'綁定為本機帳號':'建立新帳號'}</h3>
+    ${migrate?`<p style="margin-bottom:12px">目前訪客的進度${gn?`（${gn} 題）`:''}會一併搬進這個帳號。</p>`:''}
     <input class="field" id="nm" placeholder="名稱（例如：小華）" maxlength="12">
     <input class="field" type="password" id="pw1" placeholder="密碼（可留白＝不設密碼）" autocomplete="new-password">
     <input class="field" type="password" id="pw2" placeholder="再輸入一次密碼" autocomplete="new-password">
@@ -318,10 +395,31 @@ window.createProfileModal=function(){
     const prof={id,name:nm,color:PROF_COLORS[ROOT.profiles.length%PROF_COLORS.length]};
     if(p1)prof.pw=await hashPw(p1);
     ROOT.profiles.push(prof);
-    closeModal();activate(id);go({name:'home'});toast('帳號已建立');
+    const mig=migrate&&isGuest();
+    if(mig){ROOT.data[id]=JSON.parse(JSON.stringify(S));dropGuest();}
+    closeModal();activate(id);go({name:'home'});toast(mig?'進度已保存到帳號 ✓':'帳號已建立');
   };
 };
+function guestSheet(){
+  const n=guestCount();
+  modal(`<h3>👣 訪客模式</h3>
+  <p class="guestnote">目前的進度${n?`（已作答 <b>${n}</b> 題）`:''}只留在這個頁面，重新整理或關掉分頁就會消失。</p>
+  <div class="sheet">
+    <div class="row"><div class="lbl">答對自動下一題<small>刷題模式答對後 0.7 秒自動跳下一題</small></div>
+      <button class="switch ${S.auto?'on':''}" id="swauto"></button></div>
+    <div class="row"><div class="lbl">綁定帳號<small>把現在的進度永久保存下來</small></div>
+      <button class="btn small green" id="gbind">綁定</button></div>
+    <div class="row"><div class="lbl">匯出進度<small>下載進度檔，之後可匯入任何帳號</small></div>
+      <button class="btn small ghost" onclick="exportProgress()">匯出</button></div>
+    <div class="row"><div class="lbl">離開訪客模式<small>回到帳號選擇畫面</small></div>
+      <button class="btn small ghost" id="gleave">離開</button></div>
+  </div>`);
+  $('#swauto').onclick=()=>{S.auto=!S.auto;$('#swauto').classList.toggle('on',S.auto);};
+  $('#gbind').onclick=()=>{closeModal();bindNow();};
+  $('#gleave').onclick=()=>{closeModal();leaveGuest();};
+}
 window.accountSheet=function(){
+  if(isGuest()){guestSheet();return;}
   const p=activeProfile(); if(!p)return;
   const cloud=!!FB_CONFIG;
   modal(`<h3><span class="av avatarbtn" style="display:inline-flex;width:30px;height:30px;font-size:.85rem;vertical-align:-8px;background:${p.color};box-shadow:none">${esc(p.name[0])}</span>　${esc(p.name)}</h3>
@@ -391,7 +489,12 @@ async function cloudActivate(u){
       ROOT.data[id]=ROOT.data[id]?mergeData(ROOT.data[id],remote):remote;
     }
   }catch(e){console.warn(e);}
-  activate(id); go({name:'home'}); toast('雲端帳號已登入');
+  let migrated=false;
+  if(pendingGuestData){
+    ROOT.data[id]=ROOT.data[id]?mergeData(ROOT.data[id],pendingGuestData):pendingGuestData;
+    pendingGuestData=null; dropGuest(); migrated=true;
+  }
+  activate(id); go({name:'home'}); toast(migrated?'進度已存進雲端帳號 ✓':'雲端帳號已登入');
 }
 function mergeData(a,b){
   const out=JSON.parse(JSON.stringify(a));
@@ -474,8 +577,11 @@ function renderHome(){
   <div class="hdr">
     <div class="plate">駕照筆試模擬考場<small>MOCK&nbsp;WRITTEN&nbsp;TEST</small></div>
     <div class="grow"></div>
-    <button class="avatarbtn" style="background:${p.color}" onclick="accountSheet()" title="${esc(p.name)}">${esc(p.name[0])}</button>
+    <button class="avatarbtn${isGuest()?' guest':''}" style="background:${p.color}" onclick="accountSheet()" title="${esc(p.name)}">${esc(p.name[0])}</button>
   </div>
+  ${isGuest()?`<div class="gbar">${SVG.guest}<div class="txt"><b>訪客模式${guestCount()?`・已作答 ${guestCount()} 題`:''}</b>
+    <small>進度不會保存，重新整理就會消失</small></div>
+    <button class="btn small green" onclick="bindNow()">綁定帳號</button></div>`:''}
   <div class="seg" role="tablist">
     <button class="${S.bank==='moto'?'on':''}" onclick="setBank('moto')">🛵 機車</button>
     <button class="${S.bank==='car'?'on':''}" onclick="setBank('car')">🚗 汽車</button>
@@ -523,7 +629,8 @@ function scopeName(scope){
   if(scope.type==='wrong')return '錯題複習';
   return '刷題';
 }
-window.startPractice=function(scope){
+window.startPractice=function(scope){guestWarn('practice',()=>doStartPractice(scope));};
+function doStartPractice(scope){
   const ids=scopeIds(scope);
   if(!ids.length){toast('這個範圍沒有題目');return;}
   let queue;
@@ -537,8 +644,10 @@ window.startPractice=function(scope){
   }
   practice={scope,queue,i:0,sessC:0,sessW:0,answered:null,from:view.name};
   go({name:'practice'});
-};
-function endPractice(){const f=practice&&practice.from;practice=null;go({name:(f==='wrong'||f==='cats')?f:'home'});}
+}
+function endPractice(){const f=practice&&practice.from;const ans=practice?practice.sessC+practice.sessW:0;
+  practice=null;go({name:(f==='wrong'||f==='cats')?f:'home'});
+  if(ans)setTimeout(()=>guestBindPrompt('practice'),380);}
 function scopeProgress(){
   const p=practice;
   if(p.scope.type==='all')return [S.round[S.bank].length,bank().qs.length];
@@ -627,6 +736,7 @@ function practiceDone(){
       ${p.scope.type==='wrong'&&wrongList(S.bank).length?`<button class="btn" onclick="startPractice({type:'wrong'})">繼續複習剩餘錯題</button>`:''}
     </div></div>`;
   practice=null;
+  setTimeout(()=>guestBindPrompt('practice'),420);
 }
 function roundDoneModal(){
   const total=bank().qs.length;
@@ -683,14 +793,16 @@ window.clearWrongConfirm=()=>confirmModal('清空錯題本？','所有錯題標�
 /* ---------- exam (deadline-based timer) ---------- */
 const EXAM_N=50, EXAM_MS=30*60*1000, PASS=85;
 function fmtMs(ms){ms=Math.max(0,ms);const t=Math.ceil(ms/1000),m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
-window.startExamConfirm=function(){
+window.startExamConfirm=function(){guestWarn('exam',doStartExamConfirm);};
+function doStartExamConfirm(){
   if(S.exam){resumeExam();return;}
   const carNote=S.bank==='car'?'<br><br>註：正式汽車筆試為 45 題選擇＋5 題危險感知影片題；本模擬考以 50 題選擇題計分。':'';
-  confirmModal('開始模擬考？',`${bank().label}題庫隨機 ${EXAM_N} 題、限時 30 分鐘、每題 2 分、${PASS} 分及格。中途離開或重新整理，計時會暫停並保留進度。${carNote}`,()=>{
+  const keepNote=isGuest()?'中途離開會暫停計時，但<b>重新整理整場就會消失</b>（訪客模式不保存）。':'中途離開或重新整理，計時會暫停並保留進度。';
+  confirmModal('開始模擬考？',`${bank().label}題庫隨機 ${EXAM_N} 題、限時 30 分鐘、每題 2 分、${PASS} 分及格。${keepNote}${carNote}`,()=>{
     exam={bank:S.bank,qs:shuffle(bank().qs.map(q=>q.n)).slice(0,EXAM_N),ans:{},i:0,leftMs:EXAM_MS,lastTick:Date.now()};
     persistExam();go({name:'exam'});
   });
-};
+}
 window.resumeExam=function(){
   exam=S.exam;exam.lastTick=Date.now();
   if(S.bank!==exam.bank){S.bank=exam.bank;persist();}
@@ -784,6 +896,7 @@ function renderResult(){
     return `<div class="wrongitem">${th}<div class="t">${esc(q.q||'（圖示題）')}</div>
       <div class="sub"><span class="chip plate">№ ${q.n}</span><small>你的答案 ${w.pick?'('+w.pick+')':'未作答'}・正解 (${q.a})</small></div></div>`;
   }).join(''):''}`;
+  setTimeout(()=>guestBindPrompt('exam'),650);
 }
 
 /* ---------- modal / toast / zoom ---------- */
@@ -856,7 +969,10 @@ document.addEventListener('keydown',e=>{
     else if(e.key==='ArrowLeft')examNav(-1);
   }
 });
-window.addEventListener('beforeunload',e=>{if(exam){persistExam();e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{
+  if(exam)persistExam();
+  if(exam||(isGuest()&&guestCount())){e.preventDefault();e.returnValue='';}
+});
 document.addEventListener('visibilitychange',()=>{if(exam&&document.visibilityState==='hidden')persistExam();});
 
 /* ---------- road-sign icons ---------- */
@@ -868,6 +984,7 @@ const SVG={
  signDrill:`<svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#1554a6"/><circle cx="20" cy="20" r="18" fill="none" stroke="#fff" stroke-width="2.6" opacity=".95"/><path d="M20 9l7 11h-4.6v10h-4.8V20H13z" fill="#fff"/></svg>`,
  sign50:`<svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="#fff"/><circle cx="20" cy="20" r="16.4" fill="none" stroke="#c1272d" stroke-width="4.6"/><text x="20" y="26.5" font-size="14.5" font-weight="800" text-anchor="middle" fill="#23262b" font-family="system-ui">50</text></svg>`,
  signWarn:`<svg width="40" height="40" viewBox="0 0 40 40"><path d="M20 3 L38 34 H2 Z" fill="#f5b800" stroke="#23262b" stroke-width="2" stroke-linejoin="round"/><rect x="18.4" y="13" width="3.2" height="11" rx="1.6" fill="#23262b"/><circle cx="20" cy="28.6" r="2.1" fill="#23262b"/></svg>`,
+ guest:`<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--ink2)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6"/></svg>`,
  signCat:`<svg width="40" height="40" viewBox="0 0 40 40"><rect x="2" y="6" width="36" height="28" rx="4" fill="#00703c"/><rect x="3.6" y="7.6" width="32.8" height="24.8" rx="2.8" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M11 20h12M17 14l6 6-6 6" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><rect x="27" y="12" width="6" height="3" rx="1" fill="#fff" opacity=".85"/><rect x="27" y="18.5" width="6" height="3" rx="1" fill="#fff" opacity=".85"/><rect x="27" y="25" width="6" height="3" rx="1" fill="#fff" opacity=".85"/></svg>`,
 };
 
