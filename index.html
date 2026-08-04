@@ -196,6 +196,12 @@ input{font:inherit}
 .toast{position:fixed;left:50%;bottom:calc(30px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:99px;font-size:.88rem;font-weight:600;z-index:70;box-shadow:var(--shadow);white-space:nowrap}
 .fade{animation:fade .18s ease}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.viewfoot{text-align:center;color:var(--ink2);font-size:.78rem;margin:20px auto 0;padding-top:15px;border-top:1px dashed var(--line);max-width:420px;line-height:2.1}
+.viewfoot.hide{display:none}
+.odo{display:inline-flex;gap:2px;vertical-align:-4px;margin:0 5px;padding:2px;background:#0d0f12;border-radius:5px;box-shadow:inset 0 0 0 1.5px #2c313a}
+.odo i{font-style:normal;background:linear-gradient(#2a2f37,#171a1f);color:#f2f4f7;font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:.86rem;
+  padding:3px 4px;border-radius:2px;min-width:15px;text-align:center;text-shadow:0 1px 1px rgba(0,0,0,.6)}
+.odo i.lead{color:#7b828d}
 .syncdot{width:8px;height:8px;border-radius:50%;background:var(--ink2);display:inline-block;margin-right:5px}
 .syncdot.on{background:var(--ok)}
 </style>
@@ -301,6 +307,7 @@ function renderLogin(){
       <div style="text-align:center;margin-top:12px"><button class="btn ghost small" onclick="startGuest()">👣 以訪客身分試用（不保存進度）</button></div>
     </div>
     <p class="note" style="max-width:420px;margin:26px auto 0">${cloud?'雲端帳號可跨裝置同步進度；本機帳號僅存於此瀏覽器；訪客模式不保存，但隨時可綁定帳號把進度留下來。':'本機帳號的進度只存在這台裝置；訪客模式不保存，但隨時可綁定帳號把進度留下來。'}</p>
+    ${viewFoot()}
   </div>`;
 }
 window.pickProfile=function(id){
@@ -463,10 +470,50 @@ window.importProgress=function(){
   inp.click();
 };
 
+/* ---------- view counter ---------- */
+const VIEW_BASE=1240;          // 起始基數（網站上線前的估計值）
+let viewCount=null;            // null=載入中, false=無法取得, number=實際計數
+function odometer(n){
+  const s=String(Math.max(0,n)).padStart(6,'0');
+  let lead=true,h='';
+  for(const c of s){ if(c!=='0')lead=false; h+=`<i class="${lead&&c==='0'?'lead':''}">${c}</i>`; }
+  return `<span class="odo">${h}</span>`;
+}
+function viewsHTML(){
+  if(!FB_CONFIG||viewCount===false)return '';
+  if(viewCount===null)return '<span style="opacity:.55">總瀏覽人次計算中…</span>';
+  return `🛣 總瀏覽人次 ${odometer(VIEW_BASE+viewCount)} 次`;
+}
+function viewFoot(){return FB_CONFIG?`<div class="viewfoot${viewCount===false?' hide':''}" id="viewfoot">${viewsHTML()}</div>`:'';}
+function paintViews(){const el=$('#viewfoot');if(!el)return;el.innerHTML=viewsHTML();el.classList.toggle('hide',viewCount===false||!viewsHTML());}
+async function bumpViews(){
+  if(!FB_CONFIG)return;
+  const F=await fbInit();
+  if(!F){viewCount=false;paintViews();return;}
+  try{
+    const ref=fb.fsM.doc(fb.db,'meta','views');
+    let counted=false;
+    try{counted=!!sessionStorage.getItem('dlview');}catch(e){}
+    if(!counted){
+      await fb.fsM.setDoc(ref,{count:fb.fsM.increment(1)},{merge:true});
+      try{sessionStorage.setItem('dlview','1');}catch(e){}
+    }
+    const snap=await fb.fsM.getDoc(ref);
+    viewCount=snap.exists()?(snap.data().count||0):0;
+  }catch(e){console.warn('view counter unavailable',e);viewCount=false;}
+  paintViews();
+}
+
 /* ---------- cloud (Firebase, optional) ---------- */
-let fb=null, cloudUser=null, cloudTimer=null;
+let fb=null, cloudUser=null, cloudTimer=null, fbPromise=null;
 async function fbInit(){
-  if(!FB_CONFIG||fb!==null)return fb;
+  if(!FB_CONFIG)return null;
+  if(fb!==null)return fb||null;
+  if(fbPromise)return fbPromise;
+  fbPromise=fbBoot();
+  return fbPromise;
+}
+async function fbBoot(){
   try{
     const [appM,authM,fsM]=await Promise.all([
       import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
@@ -546,7 +593,7 @@ window.cloudEmail=async function(login){
   }
 };
 window.cloudLogout=async function(){try{await fb.authM.signOut(fb.auth);}catch(e){}cloudUser=null;closeModal();toast('已登出雲端');};
-if(FB_CONFIG)fbInit();
+if(FB_CONFIG)bumpViews();
 
 /* ---------- home ---------- */
 function gaugeSVG(pct){
@@ -613,7 +660,8 @@ function renderHome(){
     <button class="mode" onclick="go({name:'cats'})">${SVG.signCat}<b>分類練習</b>
       <small>依主題逐類擊破</small></button>
   </div>
-  <p class="note">題庫：${DATA.meta.moto_ver}、${DATA.meta.car_ver}（${DATA.meta.source}）。非官方練習工具，正式考試資訊以<a href="https://www.thb.gov.tw/cl.aspx?n=12" target="_blank" rel="noopener">交通部公路局</a>公告為準；汽車正式筆試自 115/7 起為 45 題選擇＋5 題危險感知影片題（影片題不在公開題庫）。</p>`;
+  <p class="note">題庫：${DATA.meta.moto_ver}、${DATA.meta.car_ver}（${DATA.meta.source}）。非官方練習工具，正式考試資訊以<a href="https://www.thb.gov.tw/cl.aspx?n=12" target="_blank" rel="noopener">交通部公路局</a>公告為準；汽車正式筆試自 115/7 起為 45 題選擇＋5 題危險感知影片題（影片題不在公開題庫）。</p>
+  ${viewFoot()}`;
 }
 window.setBank=b=>{S.bank=b;persist();render();};
 
